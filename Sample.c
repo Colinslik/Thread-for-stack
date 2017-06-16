@@ -1,13 +1,15 @@
 #include <string.h>
 #include <time.h>
-#include <mutex>
-#include <iostream>
-#include <thread>
+#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
 #include "Sample.h"
 
 //length of key and value
-const unsigned int KEY_LENGTH = 2;
-const unsigned int VALUE_LENGTH = 10;
+#define KEY_LENGTH 2
+#define VALUE_LENGTH 10
 
 //stack container pointer
 my_pair* HEAD = NULL;
@@ -87,7 +89,7 @@ void destructor_pair(){
 }
 
 //Random create string pair to push to stack
-void random_push(){
+void* random_push(){
 	char key[KEY_LENGTH];
 	char value[VALUE_LENGTH];
 	char temp[2];
@@ -118,7 +120,7 @@ void random_push(){
 			temp[1] = '\0';
 			strcat(value, temp);
 		}
-		std::cout << std::endl << std::endl << "PUSH item KEY: " << key << "  Value: " << value << std::endl << std::endl;
+		printf("\n\nPUSH item KEY: %s   Value: %s\n\n", key, value);
 		if (!push(key, value)){//if push fail, destory container and restart.
 			destructor_pair();
 		}
@@ -126,11 +128,11 @@ void random_push(){
 	}
 }
 //Pop entry from stack
-void recursive_pop(){
+void* recursive_pop(){
 	char *value;
 	while (1){
 		if ( HEAD && (value = pop()) != NULL){
-			std::cout << "POP Value:" << value << std::endl;
+			printf("POP Value: %s\n", value);
 			delay(5000);
 		}
 		else delay(60000);
@@ -139,23 +141,55 @@ void recursive_pop(){
 //show all entries in stack
 void stack_printf(){
 	my_pair *_ptr = HEAD;
-	std::cout << std::endl << std::endl << "Top  of stack." << std::endl << std::endl;
+	printf("\n\nTop  of stack.\n\n");
 	for (; _ptr && (_ptr != NULL); _ptr = _ptr->next)
 	{
-		std::cout << "KEY: " << _ptr->key << "   Value: " << _ptr->value << std::endl;
+		printf("KEY: %s    Value: %s\n", _ptr->key, _ptr->value);
 	}
-	std::cout << std::endl << "END  of stack." << std::endl;
+	printf("\nEND  of stack.\n");
 	delay(10000);
 }
 
-int main(int argc, char** argv){
-	signal(SIGINT, CtrlHandler);
+#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+DWORD WINAPI Thread1(LPVOID lpParam){
+	random_push();
+	return 0;
+}
+DWORD WINAPI Thread2(LPVOID lpParam){
+	recursive_pop();
+	return 0;
+}
+#endif
 
-	std::thread mThread1(random_push); //thread 1 for push entries
+int main(int argc, char** argv){
+
+#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+	HANDLE hThread1, hThread2;
+	DWORD threadID1, threadID2;
+	hThread1 = CreateThread(NULL, // security attributes ( default if NULL )
+		0, // stack SIZE default if 0
+		Thread1, // Start Address
+		NULL, // input data
+		0, // creational flag ( start if  0 )
+		&threadID1); // thread ID
+
+	hThread2 = CreateThread(NULL, // security attributes ( default if NULL )
+		0, // stack SIZE default if 0
+		Thread2, // Start Address
+		NULL, // input data
+		0, // creational flag ( start if  0 )
+		&threadID2); // thread ID
+#else
+	pthread_t thread1;
+	pthread_t thread2;
+
+	pthread_create(&thread1, NULL, random_push, NULL); //thread 1 for push entries
 	//mThread1.join();
 
-	std::thread mThread2(recursive_pop); // thread 2 for pop entries
+	pthread_create(&thread2, NULL, recursive_pop, NULL); // thread 2 for pop entries
 	//mThread2.join();
+#endif
+	signal(SIGINT, CtrlHandler);
 
 	while (1){//printf entries in stack
 		if(HEAD && HEAD != 0) stack_printf();
@@ -170,10 +204,15 @@ int main(int argc, char** argv){
 			}(HEAD);
 		*/
 		else {
-			std::cout << std::endl << std::endl << "Stack is empty!" << std::endl << std::endl;
+			printf("\n\nStack is empty!\n\n");
 			delay(10000);
 		}
 	}
+
+#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+	CloseHandle(hThread1);
+	CloseHandle(hThread2);
+#endif
 	destructor_pair();
 	getchar();
 	return 0;

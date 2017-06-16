@@ -2,15 +2,15 @@
 #define __SAMPLE_H__
 
 #include <signal.h>
-#include <iostream>
-#include <thread>
+#include <stdbool.h>
+#include <stdio.h>
 
 //sleep for win32 and linux
 #if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
 
 #include <windows.h>
 
-inline void delay(unsigned long ms)
+void delay(unsigned long ms)
 {
 	Sleep(ms);
 }
@@ -18,9 +18,9 @@ inline void delay(unsigned long ms)
 #else  /* presume POSIX */
 
 #include <unistd.h>
-#include <cstdlib>
+#include <stdlib.h>
 
-inline void delay(unsigned long ms)
+void delay(unsigned long ms)
 {
 	usleep(ms * 1000);
 }
@@ -35,17 +35,17 @@ bool consoleHandler(int signal){
 //#else
 	if (signal == SIGINT){
 //#endif
-		std::cout << "Signal caught2" << std::endl;
+		printf("Signal caught2\n");
 		//exit(0);
 	}
-	std::cout << "signal:" << signal << " SIGINT:" << SIGINT << std::endl;
+	printf("signal:%d  SIGINT: %d\n",signal, SIGINT);
 	exit(1);
 }
 
 //Exception handle 1
 
 void CtrlHandler(int sig){
-	std::cout << "Signal caught" << std::endl;
+	printf("Signal caught\n");
 	consoleHandler(sig);
 }
 
