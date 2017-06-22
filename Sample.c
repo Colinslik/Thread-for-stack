@@ -2,7 +2,7 @@
 #include <time.h>
 #if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
 #include <windows.h>
-#define TERMINATE_TIME 100
+#define TERMINATE_TIME 10
 #else
 #include <pthread.h>
 #define TERMINATE_TIME 0.01
@@ -12,7 +12,19 @@
 //length of key and value
 #define KEY_LENGTH 2
 #define VALUE_LENGTH 10
-\
+
+#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+HANDLE hMutex1 = NULL;
+HANDLE hEvent1 = NULL;
+HANDLE hEvent2 = NULL;
+HANDLE hEvent3 = NULL;
+HANDLE hEvent4 = NULL;
+#else
+pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex2 = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond1 = PTHREAD_COND_INITIALIZER;
+pthread_cond_t cond2 = PTHREAD_COND_INITIALIZER;
+#endif
 
 //stack container pointer
 my_pair* HEAD = NULL;
@@ -21,7 +33,6 @@ bool run = 1;
 
 //stack push
 bool push(char* key, char* value){
-
 	my_pair *_ptr = HEAD;
 	char* _key = (char *)malloc(KEY_LENGTH * sizeof(char));
 	char* _value = (char *)malloc(VALUE_LENGTH * sizeof(char));
@@ -74,6 +85,7 @@ char* pop(){
 
 //pair struct search method by key
 my_pair* pair_find(char *key){
+
 	my_pair *_ptr = HEAD;
 	if (_ptr){
 		for (; _ptr != NULL; _ptr = (*_ptr).next){
@@ -85,14 +97,35 @@ my_pair* pair_find(char *key){
 
 //free resource accupied by stack container
 void destructor_pair(){
+
+/*#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+	WaitForSingleObject(hMutex1, INFINITE);
+#else
+	pthread_mutex_lock( &mutex1 ); 
+#endif
+*/
 	my_pair *_ptr, *_tail;
 
 	printf("\nRelease Resource.\n");
-	for (_ptr = HEAD; _ptr != NULL; _ptr = _ptr->next)
+	for (_ptr = HEAD; _ptr;)
 	{
 		_tail = _ptr;
-		free(_tail);
+		if (_ptr->next) {
+			_ptr = _ptr->next;
+			free(_tail);
+		}
+		else{
+			free(_tail);
+			break;
+		}
 	}
+
+/*#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+	ReleaseMutex(hMutex1);
+#else
+	pthread_mutex_unlock( &mutex1 );
+#endif
+*/
 }
 
 //Random create string pair to push to stack
@@ -103,9 +136,16 @@ void* random_push(){
 	time_t t;
 	my_pair *_ptr;
 
+	int count = 0;
+
 	srand((unsigned)time(&t));
 
 	while (run){
+#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+		WaitForSingleObject(hMutex1, INFINITE);
+#else
+		pthread_mutex_lock(&mutex1);
+#endif
 		strcpy(key, "\0");
 		strcpy(value, "\0");
 		strcpy(temp, "\0");
@@ -131,30 +171,71 @@ void* random_push(){
 		if (!push(key, value)){//if push fail, destory container and restart.
 			destructor_pair();
 		}
-		else delay(2000);
+		//		else delay(2000);
+	
+		count++;
+		if (count > 5) {
+#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+		PulseEvent(hEvent4);
+		WaitForSingleObject(hEvent3, INFINITE);
+#else
+		pthread_mutex_lock(&mutex2);
+		pthread_cond_wait(&cond2, &mutex2);
+		pthread_mutex_unlock(&mutex2);
+#endif
+		}
+		if (count > 10) {
+			count = 0;
+#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+			while (ReleaseMutex(hMutex1)); //printf("Relaease Mutex.\n\n\n");
+			PulseEvent(hEvent1);
+			WaitForSingleObject(hEvent2, INFINITE);
+		}
+#else
+			pthread_cond_signal (&cond1);
+			pthread_cond_wait (&cond1, &mutex1);
+		}
+		pthread_mutex_unlock(&mutex1);
+#endif
 	}
 }
 //Pop entry from stack
 void* recursive_pop(){
 	char *value;
 	while (run){
-		if ( HEAD && (value = pop()) != NULL){
+#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+		WaitForSingleObject(hMutex1, INFINITE);
+#else
+		pthread_mutex_lock(&mutex1);
+#endif
+		if (HEAD && (value = pop()) != NULL){
 			printf("POP Value: %s\n", value);
-			delay(1000);
+			//			delay(1000);
 		}
-		else delay(10000);
+		else {//delay(10000);
+#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+			while (ReleaseMutex(hMutex1)); //printf("Relaease Mutex.\n\n\n");;
+			PulseEvent(hEvent2);
+			WaitForSingleObject(hEvent1, INFINITE);
+		}
+#else
+			pthread_cond_signal (&cond1);
+			pthread_cond_wait (&cond1, &mutex1);
+		}
+		pthread_mutex_unlock(&mutex1);
+#endif
 	}
 }
 //show all entries in stack
 void stack_printf(){
 	my_pair *_ptr = HEAD;
 	printf("\n\nTop  of stack.\n\n");
-	for (; _ptr && (_ptr != NULL); _ptr = _ptr->next)
+	for (; _ptr && _ptr != NULL; _ptr = _ptr->next)
 	{
 		printf("KEY: %s    Value: %s\n", _ptr->key, _ptr->value);
 	}
 	printf("\nEND  of stack.\n");
-	delay(5000);
+	//delay(5000);
 }
 
 #if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
@@ -175,6 +256,13 @@ int main(int argc, char** argv){
 #if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
 	HANDLE hThread1, hThread2;
 	DWORD threadID1, threadID2;
+
+	hMutex1 = CreateMutex(NULL, FALSE, "MyMutex1");
+	hEvent1 = CreateEvent(NULL, FALSE, FALSE, NULL);
+	hEvent2 = CreateEvent(NULL, FALSE, FALSE, NULL);
+	hEvent3 = CreateEvent(NULL, FALSE, FALSE, NULL);
+	hEvent4 = CreateEvent(NULL, FALSE, FALSE, NULL);
+
 	hThread1 = CreateThread(NULL, // security attributes ( default if NULL )
 		0, // stack SIZE default if 0
 		Thread1, // Start Address
@@ -205,7 +293,18 @@ int main(int argc, char** argv){
 	start = clock();
 
 	while (run){//printf entries in stack
-		if(HEAD && HEAD != 0) stack_printf();
+		if (HEAD && HEAD != 0) {
+#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+			PulseEvent(hEvent3);
+			WaitForSingleObject(hEvent4, INFINITE);
+			stack_printf();
+#else
+			pthread_mutex_lock(&mutex2);
+			stack_printf();
+			pthread_cond_signal(&cond2);
+			pthread_mutex_unlock(&mutex2);
+#endif			
+		}
 /*		{
 			[=](my_pair *_ptr) {
 				for (; _ptr != NULL; _ptr = _ptr->next)
@@ -218,7 +317,7 @@ int main(int argc, char** argv){
 		*/
 		else {
 			printf("\n\nStack is empty!\n\n");
-			delay(5000);
+			//delay(500);
 		}
 		now = clock();
 		printf("\n\nTIME is %f\n\n", (now - start) / (double)(CLOCKS_PER_SEC));
@@ -226,11 +325,22 @@ int main(int argc, char** argv){
 	}
 
 #if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+	SetEvent(hEvent1);
+	CloseHandle(hEvent1);
+	SetEvent(hEvent2);
+	CloseHandle(hEvent2);
+	SetEvent(hEvent3);
+	CloseHandle(hEvent3);
+	SetEvent(hEvent4);
+	CloseHandle(hEvent4);
+	CloseHandle(hMutex1);
 	WaitForSingleObject(hThread1, INFINITE);
 	CloseHandle(hThread1);
 	WaitForSingleObject(hThread2, INFINITE);
 	CloseHandle(hThread2);
 #else
+	pthread_cond_broadcast(&cond1);
+	pthread_cond_broadcast(&cond2);
 	pthread_join(thread1, &ret);
 	pthread_join(thread2, &ret);
 #endif
