@@ -1,13 +1,22 @@
 #include <string.h>
-#include <time.h>
+#include <chrono>
+#include <atomic>
 #include <mutex>
+#include <condition_variable>
 #include <iostream>
 #include <thread>
 #include "Sample.h"
 
+#define TERMINATE_TIME 10
+
 //length of key and value
 const unsigned int KEY_LENGTH = 2;
 const unsigned int VALUE_LENGTH = 10;
+
+std::atomic<bool> run{ true };
+
+std::mutex gMutex;
+std::condition_variable gCV1;
 
 //stack container pointer
 my_pair* HEAD = NULL;
@@ -50,7 +59,7 @@ bool push(char* key, char* value){
 }
 //stack pop
 char* pop(){
-	char* _value = (char *)malloc(VALUE_LENGTH * sizeof(char));
+	char* _value = (char *)malloc((VALUE_LENGTH + 1) * sizeof(char));
 	my_pair *_ptr = HEAD, *_pre_ptr = HEAD;
 	if (_ptr->next != NULL) {
 		_pre_ptr = _ptr;
@@ -79,24 +88,38 @@ my_pair* pair_find(char *key){
 //free resource accupied by stack container
 void destructor_pair(){
 	my_pair *_ptr, *_tail;
-	for (_ptr = HEAD; _ptr != NULL; _ptr = _ptr->next)
+
+	std::cout << std::endl <<"Release Resource." <<std::endl;
+	for (_ptr = HEAD; _ptr;)
 	{
 		_tail = _ptr;
-		free(_tail);
+		if (_ptr->next) {
+			_ptr = _ptr->next;
+			free(_tail);
+		}
+		else{
+			free(_tail);
+			break;
+		}
 	}
 }
 
 //Random create string pair to push to stack
 void random_push(){
-	char key[KEY_LENGTH];
-	char value[VALUE_LENGTH];
+	char key[KEY_LENGTH+1];
+	char value[VALUE_LENGTH+1];
 	char temp[2];
 	time_t t;
 	my_pair *_ptr;
 
+	int count = 0;
+
 	srand((unsigned)time(&t));
 
-	while (1){
+	while (run){
+
+		std::unique_lock<std::mutex> mLock(gMutex);
+
 		strcpy(key, "\0");
 		strcpy(value, "\0");
 		strcpy(temp, "\0");
@@ -122,19 +145,31 @@ void random_push(){
 		if (!push(key, value)){//if push fail, destory container and restart.
 			destructor_pair();
 		}
-		else delay(10000);
+//		else delay(10000);
+		count++;
+		mLock.unlock();
+		if (count > 5) {
+			count = 0;
+			gCV1.notify_one();
+		}
+		else delay(10);
 	}
+	std::cout << std::endl << std::endl <<"PUSH Thread is terminated." << std::endl <<std::endl;
 }
 //Pop entry from stack
 void recursive_pop(){
 	char *value;
-	while (1){
-		if ( HEAD && (value = pop()) != NULL){
+	while (run){
+
+		std::unique_lock<std::mutex> mLock(gMutex);
+		gCV1.wait(mLock);
+		while ( HEAD && (value = pop()) != NULL){
 			std::cout << "POP Value:" << value << std::endl;
-			delay(5000);
+//			delay(5000);
 		}
-		else delay(60000);
+		mLock.unlock();
 	}
+	std::cout << std::endl << std::endl << "POP Thread is terminated." << std::endl << std::endl;
 }
 //show all entries in stack
 void stack_printf(){
@@ -145,20 +180,24 @@ void stack_printf(){
 		std::cout << "KEY: " << _ptr->key << "   Value: " << _ptr->value << std::endl;
 	}
 	std::cout << std::endl << "END  of stack." << std::endl;
-	delay(10000);
+//	delay(10000);
 }
 
 int main(int argc, char** argv){
 	signal(SIGINT, CtrlHandler);
 
+	auto start = std::chrono::system_clock::now();
+
 	std::thread mThread1(random_push); //thread 1 for push entries
-	//mThread1.join();
 
 	std::thread mThread2(recursive_pop); // thread 2 for pop entries
-	//mThread2.join();
 
-	while (1){//printf entries in stack
-		if(HEAD && HEAD != 0) stack_printf();
+	while (run){//printf entries in stack
+		if (HEAD && HEAD != 0) {
+			std::unique_lock<std::mutex> mLock(gMutex);
+			stack_printf();
+			mLock.unlock();
+		}
 /*		{
 			[=](my_pair *_ptr) {
 				for (; _ptr != NULL; _ptr = _ptr->next)
@@ -171,9 +210,20 @@ int main(int argc, char** argv){
 		*/
 		else {
 			std::cout << std::endl << std::endl << "Stack is empty!" << std::endl << std::endl;
-			delay(10000);
 		}
+		auto end = std::chrono::system_clock::now();
+		auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+		std::cout	<< std::endl << std::endl << "TIME is " << double(duration.count()) * std::chrono::microseconds::period::num / std::chrono::microseconds::period::den
+					<< std::endl <<std::endl;
+		if ((double(duration.count()) * std::chrono::microseconds::period::num / std::chrono::microseconds::period::den) > TERMINATE_TIME) run = !run;
+		delay(10);
 	}
+//	std::cout << std::endl << std::endl << "wait for thread1!" << std::endl << std::endl;
+	mThread1.join();
+//	std::cout << std::endl << std::endl << "wait for thread2!" << std::endl << std::endl;
+	gCV1.notify_all();
+	mThread2.join();
+//	std::cout << std::endl << std::endl << "Destroy stack!" << std::endl << std::endl;
 	destructor_pair();
 	getchar();
 	return 0;

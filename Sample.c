@@ -5,7 +5,7 @@
 #define TERMINATE_TIME 10
 #else
 #include <pthread.h>
-#define TERMINATE_TIME 0.01
+#define TERMINATE_TIME 1
 #endif
 #include "Sample.h"
 
@@ -17,11 +17,11 @@
 HANDLE hMutex1 = NULL;
 HANDLE hEvent1 = NULL;
 HANDLE hEvent2 = NULL;
-HANDLE hEvent3 = NULL;
-HANDLE hEvent4 = NULL;
+HANDLE hThread1 = NULL, hThread2 = NULL;
+HANDLE hEvent_1[2];
+HANDLE hEvent_2[2];
 #else
 pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t mutex2 = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond1 = PTHREAD_COND_INITIALIZER;
 pthread_cond_t cond2 = PTHREAD_COND_INITIALIZER;
 #endif
@@ -68,7 +68,7 @@ bool push(char* key, char* value){
 }
 //stack pop
 char* pop(){
-	char* _value = (char *)malloc(VALUE_LENGTH * sizeof(char));
+	char* _value = (char *)malloc((VALUE_LENGTH + 1) * sizeof(char));
 	my_pair *_ptr = HEAD, *_pre_ptr = HEAD;
 	if (_ptr->next != NULL) {
 		_pre_ptr = _ptr;
@@ -98,12 +98,6 @@ my_pair* pair_find(char *key){
 //free resource accupied by stack container
 void destructor_pair(){
 
-/*#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
-	WaitForSingleObject(hMutex1, INFINITE);
-#else
-	pthread_mutex_lock( &mutex1 ); 
-#endif
-*/
 	my_pair *_ptr, *_tail;
 
 	printf("\nRelease Resource.\n");
@@ -120,16 +114,10 @@ void destructor_pair(){
 		}
 	}
 
-/*#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
-	ReleaseMutex(hMutex1);
-#else
-	pthread_mutex_unlock( &mutex1 );
-#endif
-*/
 }
 
 //Random create string pair to push to stack
-void* random_push(){
+void random_push(){
 	char key[KEY_LENGTH+1];
 	char value[VALUE_LENGTH+1];
 	char temp[2];
@@ -141,6 +129,7 @@ void* random_push(){
 	srand((unsigned)time(&t));
 
 	while (run){
+		printf("\n\nPUSH Thread wait for Mutex.\n\n");
 #if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
 		WaitForSingleObject(hMutex1, INFINITE);
 #else
@@ -174,57 +163,54 @@ void* random_push(){
 		//		else delay(2000);
 	
 		count++;
-		if (count > 5) {
+			printf("\n\nPUSH Thread wait for Print event.\n\n");
 #if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
-		PulseEvent(hEvent4);
-		WaitForSingleObject(hEvent3, INFINITE);
+		ReleaseMutex(hMutex1);
 #else
-		pthread_mutex_lock(&mutex2);
-		pthread_cond_wait(&cond2, &mutex2);
-		pthread_mutex_unlock(&mutex2);
-#endif
-		}
-		if (count > 10) {
-			count = 0;
-#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
-			while (ReleaseMutex(hMutex1)); //printf("Relaease Mutex.\n\n\n");
-			PulseEvent(hEvent1);
-			WaitForSingleObject(hEvent2, INFINITE);
-		}
-#else
-			pthread_cond_signal (&cond1);
-			pthread_cond_wait (&cond1, &mutex1);
-		}
 		pthread_mutex_unlock(&mutex1);
 #endif
+		if (count > 5) {
+			printf("\n\nPUSH Thread wait for POP event. count:%d\n\n",count);
+			count = 0;
+#if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+			SetEvent(hEvent1);
+		}
+		else SetEvent(hEvent2);
+#else
+			pthread_cond_signal (&cond1);
+		}
+		else pthread_cond_signal(&cond2);
+#endif
 	}
+	printf("\n\nPUSH Thread is terminated.\n\n");
 }
 //Pop entry from stack
-void* recursive_pop(){
+void recursive_pop(){
 	char *value;
 	while (run){
+		printf("\n\nPOP Thread wait for PUSH event.\n\n");
 #if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
+		WaitForMultipleObjects(2, hEvent_1, FALSE, INFINITE);
+
+		printf("\n\nPop Thread wait for Mutex.\n\n");
+
 		WaitForSingleObject(hMutex1, INFINITE);
 #else
 		pthread_mutex_lock(&mutex1);
+		pthread_cond_wait(&cond1, &mutex1);
 #endif
-		if (HEAD && (value = pop()) != NULL){
+		printf("\n\nPop Thread start to pop.\n\n");
+		while (HEAD && (value = pop()) != NULL){
 			printf("POP Value: %s\n", value);
 			//			delay(1000);
 		}
-		else {//delay(10000);
 #if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
-			while (ReleaseMutex(hMutex1)); //printf("Relaease Mutex.\n\n\n");;
-			PulseEvent(hEvent2);
-			WaitForSingleObject(hEvent1, INFINITE);
-		}
+		ReleaseMutex(hMutex1);
 #else
-			pthread_cond_signal (&cond1);
-			pthread_cond_wait (&cond1, &mutex1);
-		}
 		pthread_mutex_unlock(&mutex1);
 #endif
 	}
+	printf("\n\nPOP Thread is terminated.\n\n");
 }
 //show all entries in stack
 void stack_printf(){
@@ -241,12 +227,12 @@ void stack_printf(){
 #if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
 DWORD WINAPI Thread1(LPVOID lpParam){
 	random_push();
-	printf("\n\nPUSH Thread is terminated.\n\n");
+	//printf("\n\nPUSH Thread is terminated.\n\n");
 	return 0;
 }
 DWORD WINAPI Thread2(LPVOID lpParam){
 	recursive_pop();
-	printf("\n\nPOP Thread is terminated.\n\n");
+	//printf("\n\nPOP Thread is terminated.\n\n");
 	return 0;
 }
 #endif
@@ -254,14 +240,11 @@ DWORD WINAPI Thread2(LPVOID lpParam){
 int main(int argc, char** argv){
 
 #if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
-	HANDLE hThread1, hThread2;
+	//	HANDLE hThread1, hThread2;
 	DWORD threadID1, threadID2;
 
 	hMutex1 = CreateMutex(NULL, FALSE, "MyMutex1");
 	hEvent1 = CreateEvent(NULL, FALSE, FALSE, NULL);
-	hEvent2 = CreateEvent(NULL, FALSE, FALSE, NULL);
-	hEvent3 = CreateEvent(NULL, FALSE, FALSE, NULL);
-	hEvent4 = CreateEvent(NULL, FALSE, FALSE, NULL);
 
 	hThread1 = CreateThread(NULL, // security attributes ( default if NULL )
 		0, // stack SIZE default if 0
@@ -276,16 +259,20 @@ int main(int argc, char** argv){
 		NULL, // input data
 		0, // creational flag ( start if  0 )
 		&threadID2); // thread ID
+
+	hEvent_1[0] = hEvent1;
+	hEvent_1[1] = hThread1;
+	hEvent_2[0] = hEvent2;
+	hEvent_2[1] = hThread1;
+
 #else
 	void *ret;
 	pthread_t thread1;
 	pthread_t thread2;
 
-	pthread_create(&thread1, NULL, random_push, NULL); //thread 1 for push entries
-	//mThread1.join();
+	pthread_create(&thread1, NULL, (void *)random_push, NULL); //thread 1 for push entries
 
-	pthread_create(&thread2, NULL, recursive_pop, NULL); // thread 2 for pop entries
-	//mThread2.join();
+	pthread_create(&thread2, NULL, (void *)recursive_pop, NULL); // thread 2 for pop entries
 #endif
 	clock_t start, now;
 	signal(SIGINT, CtrlHandler);
@@ -295,14 +282,15 @@ int main(int argc, char** argv){
 	while (run){//printf entries in stack
 		if (HEAD && HEAD != 0) {
 #if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
-			PulseEvent(hEvent3);
-			WaitForSingleObject(hEvent4, INFINITE);
+			WaitForMultipleObjects(2, hEvent_2, FALSE, INFINITE);
+			WaitForSingleObject(hMutex1, INFINITE);
 			stack_printf();
+			ReleaseMutex(hMutex1);
 #else
-			pthread_mutex_lock(&mutex2);
+			pthread_mutex_lock(&mutex1);
+			pthread_cond_wait(&cond2, &mutex1);
 			stack_printf();
-			pthread_cond_signal(&cond2);
-			pthread_mutex_unlock(&mutex2);
+			pthread_mutex_unlock(&mutex1);
 #endif			
 		}
 /*		{
@@ -325,24 +313,25 @@ int main(int argc, char** argv){
 	}
 
 #if defined(__WIN32__) || defined(_WIN32) || defined(WIN32) || defined(__WINDOWS__) || defined(__TOS_WIN__)
-	SetEvent(hEvent1);
-	CloseHandle(hEvent1);
-	SetEvent(hEvent2);
-	CloseHandle(hEvent2);
-	SetEvent(hEvent3);
-	CloseHandle(hEvent3);
-	SetEvent(hEvent4);
-	CloseHandle(hEvent4);
-	CloseHandle(hMutex1);
+	printf("\n\nWait for thread1!\n\n");
 	WaitForSingleObject(hThread1, INFINITE);
 	CloseHandle(hThread1);
+	printf("\n\nWait for thread2!\n\n");
 	WaitForSingleObject(hThread2, INFINITE);
 	CloseHandle(hThread2);
+	CloseHandle(hEvent1);
+	CloseHandle(hEvent2);
+	CloseHandle(hMutex1);
 #else
 	pthread_cond_broadcast(&cond1);
-	pthread_cond_broadcast(&cond2);
+	printf("\n\nWait for thread1!\n\n");
 	pthread_join(thread1, &ret);
+	pthread_cond_broadcast(&cond2);
+	printf("\n\nWait for thread2!\n\n");
 	pthread_join(thread2, &ret);
+	pthread_mutex_destroy(&mutex1);
+	pthread_cond_destroy(&cond1);
+	pthread_cond_destroy(&cond2);
 #endif
 	destructor_pair();
 	printf("\n\nTerminate.\n\n");
